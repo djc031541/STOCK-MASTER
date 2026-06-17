@@ -1,0 +1,137 @@
+// GlobalTrade Advisor — 데이터 구조
+// 무료 시작: SQLite. 나중에 Postgres 전환 시 provider만 "postgresql"로 바꾸고
+// DATABASE_URL을 교체하면 됩니다.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 사용자
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  riskProfile String   @default("중립") // 안정 | 중립 | 공격 → 신호 임계값 조정
+  notifyPush  Boolean  @default(true)
+  notifyKakao Boolean  @default(false)
+  notifyEmail Boolean  @default(true)
+  quietFrom   Int      @default(23) // 방해금지 시작 시각(시)
+  quietTo     Int      @default(7)  // 방해금지 종료 시각(시)
+  createdAt   DateTime @default(now())
+
+  portfolio Portfolio?
+  watchlist Watchlist[]
+}
+
+// 포트폴리오 / 시드머니
+model Portfolio {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  baseCurrency String    @default("KRW")
+  seedAmount   Float     @default(0) // 시드머니
+  cashBalance  Float     @default(0)
+  createdAt    DateTime  @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holdings Holding[]
+}
+
+// 보유 종목
+model Holding {
+  id           String  @id @default(cuid())
+  portfolioId  String
+  symbol       String  // 예: NVDA, 005930.KS
+  market       String  // US | KR | ...
+  qty          Float
+  avgBuyPrice  Float
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, symbol])
+  @@index([portfolioId])
+}
+
+// 관심종목 (워치리스트)
+model Watchlist {
+  id         String  @id @default(cuid())
+  userId     String
+  symbol     String
+  market     String
+  targetPrice Float? // 목표가 도달 알림용
+  stopLoss    Float? // 손절가 도달 알림용
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol])
+  @@index([userId])
+}
+
+// 일봉 시세 캐시 (차트/백테스팅/지표 계산용)
+model PriceDaily {
+  id     String   @id @default(cuid())
+  symbol String
+  date   DateTime
+  open   Float
+  high   Float
+  low    Float
+  close  Float
+  volume Float
+
+  @@unique([symbol, date])
+  @@index([symbol])
+}
+
+// 생성된 매매 신호
+model Signal {
+  id         String   @id @default(cuid())
+  symbol     String
+  type       String   // STRONG_BUY | BUY | HOLD | SELL | STRONG_SELL
+  score      Float    // -100 ~ +100
+  price      Float
+  indicators String   // JSON 문자열 (rsi, macd, ma, bollinger 스냅샷)
+  sent       Boolean  @default(false) // 알림 발송 여부(중복 방지)
+  createdAt  DateTime @default(now())
+
+  @@index([symbol, createdAt])
+}
+
+// 목표가/손절가 알림 이력: 같은 조건의 반복 알림을 막는다.
+model PriceAlertEvent {
+  id          String   @id @default(cuid())
+  watchlistId String
+  symbol      String
+  kind        String   // TARGET | STOP
+  threshold   Float
+  triggeredAt DateTime @default(now())
+
+  @@unique([watchlistId, kind, threshold])
+  @@index([symbol, triggeredAt])
+}
+
+// 외부 데이터 응답 캐시 (Yahoo quote/candles 등)
+model DataCache {
+  key       String   @id
+  payload   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+// 일일 뉴스 브리핑 아카이브
+model NewsBrief {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+  contentMd String   // 마크다운 본문 (세계증시 + 요약)
+  summary   String   // 한 줄 요약
+  kidMd     String?  // 🧒 초딩 버전(쉬운 설명)
+  itemsJson String?  // 구조화 기사 목록 JSON (제목/링크/출처/favicon)
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+}
