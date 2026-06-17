@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stock Master</title>
+    <meta name="description" content="브라우저에서 바로 실행되는 주식 모니터링 앱" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1115;
+        --surface: #171a21;
+        --surface2: #1f232c;
+        --border: #2a2f3a;
+        --text: #e7eaf0;
+        --dim: #9aa3b2;
+        --faint: #6b7280;
+        --up: #22c55e;
+        --down: #ef4444;
+        --warn: #f59e0b;
+        --accent: #3b82f6;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      }
+      .container { max-width: 1100px; margin: 0 auto; padding: 24px 18px 72px; }
+      header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+      h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0; }
+      h2 { margin: 0 0 10px; font-size: 15px; }
+      p { margin: 4px 0 0; color: var(--dim); line-height: 1.55; font-size: 13px; }
+      .grid { display: grid; gap: 12px; }
+      .cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 13px;
+        overflow: hidden;
+      }
+      .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .section { margin: 22px 0; }
+      .muted { color: var(--dim); }
+      .faint { color: var(--faint); font-size: 12px; }
+      .up { color: var(--up); }
+      .down { color: var(--down); }
+      .warn { color: var(--warn); }
+      button, input, select {
+        font: inherit;
+      }
+      input, select {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 10px;
+        min-width: 0;
+      }
+      button, .btn {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 11px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 36px;
+      }
+      button:hover, .btn:hover { border-color: var(--accent); }
+      button:disabled { opacity: .55; cursor: not-allowed; }
+      .active { border-color: var(--accent); color: #fff; }
+      .badge {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .success { background: rgba(34,197,94,.15); color: #4ade80; }
+      .danger { background: rgba(239,68,68,.15); color: #f87171; }
+      .warning { background: rgba(245,158,11,.15); color: #fbbf24; }
+      .row {
+        display: grid;
+        grid-template-columns: 1.2fr .7fr .7fr .8fr auto;
+        gap: 8px;
+        align-items: center;
+        padding: 9px 0;
+        border-top: 1px solid var(--border);
+      }
+      .watch {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 12px;
+      }
+      .watchHead { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+      .reasons { margin: 10px 0 0; padding-left: 18px; color: var(--dim); font-size: 12px; line-height: 1.6; }
+      canvas { width: 100%; height: 190px; display: block; margin-top: 10px; background: #10131a; border: 1px solid var(--border); border-radius: 8px; }
+      .status { min-height: 18px; color: var(--faint); font-size: 12px; margin-top: 8px; }
+      .formGrid { display: grid; grid-template-columns: 1.2fr .7fr .7fr .8fr auto; gap: 8px; margin-bottom: 10px; }
+      .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .small { font-size: 12px; }
+      @media (max-width: 760px) {
+        header, .split { display: block; }
+        .toolbar { margin-top: 12px; }
+        .row, .formGrid { grid-template-columns: 1fr 1fr; }
+        .row > :last-child, .formGrid > :last-child { grid-column: 1 / -1; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <div>
+          <h1>Stock Master</h1>
+          <p>서버 없이 index.html 하나로 실행되는 주식 모니터링 앱 · 데이터는 Yahoo Finance 공개 차트 API를 CORS 프록시로 조회합니다.</p>
+        </div>
+        <div class="toolbar">
+          <button id="refreshBtn">새로고침</button>
+          <button id="notifyBtn">브라우저 알림 켜기</button>
+          <select id="risk">
+            <option>안정</option>
+            <option selected>중립</option>
+            <option>공격</option>
+          </select>
+        </div>
+      </header>
+
+      <section class="grid cards section" id="summary"></section>
+
+      <section class="section">
+        <h2>세계 증시</h2>
+        <div class="grid cards" id="indices"></div>
+      </section>
+
+      <section class="section card">
+        <h2>보유종목</h2>
+        <div class="formGrid">
+          <input id="hSymbol" placeholder="심볼 예: NVDA, 005930.KS" />
+          <input id="hMarket" placeholder="시장 US/KR" value="US" />
+          <input id="hQty" placeholder="수량" inputmode="decimal" />
+          <input id="hAvg" placeholder="평단가" inputmode="decimal" />
+          <button id="addHolding">보유 추가</button>
+        </div>
+        <div id="holdings"></div>
+      </section>
+
+      <section class="section card">
+        <div class="toolbar" style="justify-content: space-between; margin-bottom: 10px;">
+          <h2 style="margin:0;">관심종목 · 매매 신호</h2>
+          <div class="toolbar">
+            <input id="wSymbol" placeholder="심볼 추가" />
+            <input id="wTarget" placeholder="목표가" inputmode="decimal" style="width:90px;" />
+            <input id="wStop" placeholder="손절가" inputmode="decimal" style="width:90px;" />
+            <button id="addWatch">추가</button>
+          </div>
+        </div>
+        <div class="watch" id="watchlist"></div>
+      </section>
+
+      <section class="section split">
+        <div class="card">
+          <h2>국가별 추천</h2>
+          <div class="toolbar" id="marketTabs" style="margin-bottom:10px;"></div>
+          <div id="recommendations"></div>
+        </div>
+        <div class="card">
+          <h2>뉴스</h2>
+          <button id="newsBtn">경제 뉴스 불러오기</button>
+          <div id="news" class="status">Google News RSS를 프록시로 불러옵니다.</div>
+        </div>
+      </section>
+
+      <p class="faint">모든 신호와 뉴스는 투자 참고용입니다. 데이터 프록시는 무료 공개 서비스라 가끔 느리거나 막힐 수 있습니다.</p>
+    </main>
+
+    <script>
+      const S = {
+        indices: [
+          ["^GSPC", "S&P 500"], ["^IXIC", "나스닥"], ["^DJI", "다우"], ["^KS11", "코스피"],
+          ["^KQ11", "코스닥"], ["^N225", "닛케이225"], ["^HSI", "항셍"], ["KRW=X", "USD/KRW"]
+        ],
+        universe: {
+          US: [["AAPL","애플"],["MSFT","마이크로소프트"],["NVDA","엔비디아"],["AMZN","아마존"],["GOOGL","알파벳"],["META","메타"],["TSLA","테슬라"],["AVGO","브로드컴"],["AMD","AMD"]],
+          KR: [["005930.KS","삼성전자"],["000660.KS","SK하이닉스"],["005380.KS","현대차"],["035420.KS","NAVER"],["035720.KS","카카오"],["068270.KS","셀트리온"]],
+          JP: [["7203.T","토요타"],["6758.T","소니"],["9984.T","소프트뱅크"],["8035.T","도쿄일렉트론"]],
+          HK: [["0700.HK","텐센트"],["9988.HK","알리바바"],["3690.HK","메이퇀"],["1810.HK","샤오미"]]
+        },
+        watch: [["NVDA", null, null], ["AAPL", null, null], ["TSLA", null, null], ["005930.KS", null, null]],
+        holdings: [
+          { symbol: "NVDA", market: "US", qty: 5, avgBuyPrice: 150 },
+          { symbol: "AAPL", market: "US", qty: 10, avgBuyPrice: 210 },
+          { symbol: "005930.KS", market: "KR", qty: 20, avgBuyPrice: 70000 }
+        ],
+        seed: 10000000,
+        cash: 3000000,
+        risk: "중립",
+        recMarket: "US"
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const fmt = (n, d = 2) => Number(n || 0).toLocaleString("ko-KR", { maximumFractionDigits: d });
+      const won = (n) => "₩" + Math.round(n || 0).toLocaleString("ko-KR");
+      const loadState = () => ({ ...S, ...JSON.parse(localStorage.getItem("stock-master-state") || "{}") });
+      let state = loadState();
+      const saveState = () => localStorage.setItem("stock-master-state", JSON.stringify({
+        watch: state.watch, holdings: state.holdings, seed: state.seed, cash: state.cash, risk: state.risk, recMarket: state.recMarket
+      }));
+
+      function classify(symbol) {
+        const s = symbol.toUpperCase();
+        if (s.endsWith(".KS") || s.endsWith(".KQ")) return "KR";
+        if (s.endsWith(".T")) return "JP";
+        if (s.endsWith(".HK")) return "HK";
+        return "US";
+      }
+
+      async function proxied(url) {
+        const urls = [
+          "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+          "https://corsproxy.io/?" + encodeURIComponent(url)
+        ];
+        let last;
+        for (const u of urls) {
+          try {
+            const r = await fetch(u);
+            if (!r.ok) throw new Error(r.status);
+            return await r.text();
+          } catch (e) { last = e; }
+        }
+        throw last || new Error("fetch failed");
+      }
+
+      async function chart(symbol, range = "1y", interval = "1d") {
+        const key = `chart:${symbol}:${range}:${interval}`;
+        const cached = JSON.parse(localStorage.getItem(key) || "null");
+        if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.data;
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}&includePrePost=false`;
+        const data = JSON.parse(await proxied(url));
+        const result = data.chart && data.chart.result && data.chart.result[0];
+        if (!result) throw new Error("데이터 없음");
+        localStorage.setItem(key, JSON.stringify({ at: Date.now(), data: result }));
+        return result;
+      }
+
+      async function quote(symbol) {
+        const r = await chart(symbol, "5d", "1d");
+        const m = r.meta;
+        const price = m.regularMarketPrice;
+        const prev = m.chartPreviousClose || m.previousClose || price;
+        return { symbol, price, prev, changePercent: prev ? (price - prev) / prev * 100 : 0, currency: m.currency || "USD" };
+      }
+
+      async function candles(symbol, range = "1y") {
+        const r = await chart(symbol, range, "1d");
+        const q = r.indicators.quote[0];
+        return (r.timestamp || []).map((t, i) => q.close[i] == null ? null : ({
+          time: t, open: q.open[i] || q.close[i], high: q.high[i] || q.close[i],
+          low: q.low[i] || q.close[i], close: q.close[i], volume: q.volume[i] || 0
+        })).filter(Boolean);
+      }
+
+      function smaSeries(v, p) {
+        return v.map((_, i) => i + 1 < p ? null : v.slice(i + 1 - p, i + 1).reduce((a,b)=>a+b,0) / p);
+      }
+      function emaSeries(v, p) {
+        const out = [], k = 2 / (p + 1); let prev = null;
+        for (let i = 0; i < v.length; i++) {
+          if (i + 1 < p) { out.push(null); continue; }
+          if (prev == null) prev = v.slice(i + 1 - p, i + 1).reduce((a,b)=>a+b,0) / p;
+          else prev = v[i] * k + prev * (1 - k);
+          out.push(prev);
+        }
+        return out;
+      }
+      function rsi(v, p = 14) {
+        if (v.length < p + 1) return null;
+        let gain = 0, loss = 0;
+        for (let i = 1; i <= p; i++) { const d = v[i] - v[i - 1]; d >= 0 ? gain += d : loss -= d; }
+        let ag = gain / p, al = loss / p;
+        for (let i = p + 1; i < v.length; i++) {
+          const d = v[i] - v[i - 1], up = d > 0 ? d : 0, down = d < 0 ? -d : 0;
+          ag = (ag * (p - 1) + up) / p; al = (al * (p - 1) + down) / p;
+        }
+        return al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+      }
+      function macd(v) {
+        const f = emaSeries(v, 12), s = emaSeries(v, 26), line = [];
+        for (let i = 0; i < v.length; i++) if (f[i] != null && s[i] != null) line.push(f[i] - s[i]);
+        const sig = emaSeries(line, 9);
+        const now = line.at(-1), prev = line.at(-2), sn = sig.at(-1), sp = sig.at(-2);
+        return { macd: now ?? null, signal: sn ?? null, hist: now != null && sn != null ? now - sn : null, histPrev: prev != null && sp != null ? prev - sp : null };
+      }
+      function boll(v, p = 20, mult = 2) {
+        if (v.length < p) return { upper: null, lower: null };
+        const a = v.slice(-p), mid = a.reduce((x,y)=>x+y,0) / p;
+        const sd = Math.sqrt(a.reduce((x,y)=>x+(y-mid)**2,0) / p);
+        return { upper: mid + mult * sd, lower: mid - mult * sd };
+      }
+      function signal(symbol, cs, risk) {
+        if (cs.length < 60) return null;
+        const closes = cs.map(c => c.close), short = smaSeries(closes, 20), long = smaSeries(closes, 60);
+        const sn = short.at(-1), sp = short.at(-2), ln = long.at(-1), lp = long.at(-2);
+        const m = macd(closes), b = boll(closes), rv = rsi(closes), last = closes.at(-1);
+        let score = 0, reasons = [];
+        if (sp != null && lp != null && sn > ln && sp <= lp) { score += 30; reasons.push("골든크로스 발생"); }
+        else if (sp != null && lp != null && sn < ln && sp >= lp) { score -= 30; reasons.push("데드크로스 발생"); }
+        else if (sn != null && ln != null) { const t = sn > ln ? 1 : -1; score += t * 18; reasons.push(t > 0 ? "상승추세 지속" : "하락추세 지속"); }
+        if (rv != null) {
+          if (rv <= 30) { score += 25; reasons.push(`RSI ${rv.toFixed(0)} 과매도`); }
+          else if (rv >= 70) { score -= 25; reasons.push(`RSI ${rv.toFixed(0)} 과매수`); }
+          else score += ((50 - rv) / 20) * 12.5;
+        }
+        if (m.histPrev != null && m.hist > 0 && m.histPrev <= 0) { score += 25; reasons.push("MACD 상향 돌파"); }
+        else if (m.histPrev != null && m.hist < 0 && m.histPrev >= 0) { score -= 25; reasons.push("MACD 하향 돌파"); }
+        else if (m.macd != null && m.signal != null) score += (m.macd > m.signal ? 15 : -15);
+        if (b.lower != null && last <= b.lower) { score += 20; reasons.push("볼린저 하단 터치"); }
+        else if (b.upper != null && last >= b.upper) { score -= 20; reasons.push("볼린저 상단 도달"); }
+        score = Math.max(-100, Math.min(100, Math.round(score)));
+        const th = { "공격": [25,40], "중립": [35,55], "안정": [50,70] }[risk] || [35,55];
+        let type = "HOLD", label = "관망", tone = "warning";
+        if (score >= th[1]) [type,label,tone] = ["STRONG_BUY","강한 매수","success"];
+        else if (score >= th[0]) [type,label,tone] = ["BUY","매수","success"];
+        else if (score <= -th[1]) [type,label,tone] = ["STRONG_SELL","강한 매도","danger"];
+        else if (score <= -th[0]) [type,label,tone] = ["SELL","매도","danger"];
+        return { symbol, price: last, score, type, label, tone, rsi: rv, reasons };
+      }
+
+      function drawChart(canvas, cs) {
+        const dpr = devicePixelRatio || 1, w = canvas.clientWidth * dpr, h = canvas.clientHeight * dpr;
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d"), pad = 18, data = cs.slice(-90);
+        const min = Math.min(...data.map(c => c.low)), max = Math.max(...data.map(c => c.high));
+        const x = i => pad + i * ((w - pad * 2) / Math.max(1, data.length - 1));
+        const y = v => h - pad - ((v - min) / Math.max(1, max - min)) * (h - pad * 2);
+        ctx.clearRect(0,0,w,h); ctx.strokeStyle = "rgba(255,255,255,.08)";
+        for (let i=0;i<4;i++){ const yy=pad+i*(h-pad*2)/3; ctx.beginPath(); ctx.moveTo(pad,yy); ctx.lineTo(w-pad,yy); ctx.stroke(); }
+        data.forEach((c,i)=>{ const xx=x(i), up=c.close>=c.open; ctx.strokeStyle=up?"#22c55e":"#ef4444"; ctx.fillStyle=ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(xx,y(c.high)); ctx.lineTo(xx,y(c.low)); ctx.stroke(); const top=y(Math.max(c.open,c.close)), bot=y(Math.min(c.open,c.close)); ctx.fillRect(xx-2*dpr, top, 4*dpr, Math.max(1, bot-top)); });
+      }
+
+      async function render() {
+        $("risk").value = state.risk;
+        $("indices").innerHTML = `<div class="card faint">불러오는 중...</div>`;
+        $("watchlist").innerHTML = `<div class="card faint">신호 계산 중...</div>`;
+        $("recommendations").innerHTML = `<div class="faint">스캔 중...</div>`;
+        saveState();
+        await Promise.all([renderIndices(), renderPortfolio(), renderWatch(), renderRecs()]);
+      }
+
+      async function renderIndices() {
+        const rows = await Promise.allSettled(state.indices.map(async ([sym, name]) => ({ name, ...(await quote(sym)) })));
+        $("indices").innerHTML = rows.map(r => {
+          if (r.status !== "fulfilled") return "";
+          const q = r.value, up = q.changePercent >= 0;
+          return `<div class="card"><div class="muted small">${q.name}</div><div style="font-size:18px;font-weight:700;margin-top:4px">${fmt(q.price, q.currency==="KRW"?0:2)}</div><div class="${up?"up":"down"} small">${up?"▲":"▼"} ${Math.abs(q.changePercent).toFixed(2)}%</div></div>`;
+        }).join("") || `<div class="card faint">지수 데이터를 못 불러왔습니다.</div>`;
+      }
+
+      async function renderPortfolio() {
+        let usdkrw = 1350;
+        try { usdkrw = (await quote("KRW=X")).price || 1350; } catch {}
+        const valued = [];
+        for (const h of state.holdings) {
+          let q = { price: h.avgBuyPrice, currency: h.market === "KR" ? "KRW" : "USD" };
+          try { q = await quote(h.symbol); } catch {}
+          const rate = q.currency === "KRW" ? 1 : usdkrw;
+          const value = q.price * h.qty * rate, cost = h.avgBuyPrice * h.qty * rate, pnl = value - cost;
+          valued.push({ ...h, price: q.price, currency: q.currency, value, pnl, pnlPct: cost ? pnl / cost * 100 : 0 });
+        }
+        const holdingsValue = valued.reduce((a,h)=>a+h.value,0), total = state.cash + holdingsValue;
+        const cost = valued.reduce((a,h)=>a + h.avgBuyPrice * h.qty * (h.currency==="KRW"?1:usdkrw),0), pnl = valued.reduce((a,h)=>a+h.pnl,0);
+        $("summary").innerHTML = `
+          <div class="card"><div class="muted small">시드머니</div><div style="font-size:18px;font-weight:700">${won(state.seed)}</div></div>
+          <div class="card"><div class="muted small">총 평가금액</div><div style="font-size:18px;font-weight:700">${won(total)}</div></div>
+          <div class="card"><div class="muted small">평가손익</div><div class="${pnl>=0?"up":"down"}" style="font-size:18px;font-weight:700">${pnl>=0?"+":""}${won(pnl)}</div></div>
+          <div class="card"><div class="muted small">수익률</div><div class="${pnl>=0?"up":"down"}" style="font-size:18px;font-weight:700">${pnl>=0?"+":""}${(cost?pnl/cost*100:0).toFixed(1)}%</div></div>`;
+        $("holdings").innerHTML = valued.map((h, i) => `<div class="row">
+          <div><b>${h.symbol}</b><div class="faint">${h.market} · 현재 ${fmt(h.price)} ${h.currency}</div></div>
+          <input value="${h.qty}" data-hi="${i}" data-k="qty" inputmode="decimal">
+          <input value="${h.avgBuyPrice}" data-hi="${i}" data-k="avgBuyPrice" inputmode="decimal">
+          <div class="${h.pnl>=0?"up":"down"} small">${h.pnl>=0?"+":""}${won(h.pnl)} · ${h.pnl>=0?"+":""}${h.pnlPct.toFixed(1)}%</div>
+          <button data-del-h="${i}">삭제</button>
+        </div>`).join("") || `<div class="faint">보유종목이 없습니다.</div>`;
+        document.querySelectorAll("[data-hi]").forEach(el => el.onchange = () => { state.holdings[+el.dataset.hi][el.dataset.k] = Number(el.value); saveState(); renderPortfolio(); });
+        document.querySelectorAll("[data-del-h]").forEach(el => el.onclick = () => { state.holdings.splice(+el.dataset.delH, 1); saveState(); renderPortfolio(); });
+      }
+
+      async function renderWatch() {
+        const cards = [];
+        for (let i = 0; i < state.watch.length; i++) {
+          const [sym, target, stop] = state.watch[i];
+          try {
+            const cs = await candles(sym, "1y"), s = signal(sym, cs, state.risk);
+            if (!s) continue;
+            const id = `c${i}`;
+            cards.push(`<div class="card">
+              <div class="watchHead"><div><b>${sym}</b><div class="faint">${fmt(s.price)} · score ${s.score} · RSI ${s.rsi ? s.rsi.toFixed(0) : "-"}</div></div><span class="badge ${s.tone}">${s.label}</span></div>
+              <ul class="reasons">${(s.reasons.length ? s.reasons : ["뚜렷한 신호 없음"]).map(x=>`<li>${x}</li>`).join("")}</ul>
+              <div class="toolbar" style="margin-top:10px"><input data-wi="${i}" data-wk="1" value="${target ?? ""}" placeholder="목표가" inputmode="decimal"><input data-wi="${i}" data-wk="2" value="${stop ?? ""}" placeholder="손절가" inputmode="decimal"><button data-del-w="${i}">삭제</button></div>
+              <canvas id="${id}"></canvas>
+            </div>`);
+            setTimeout(() => drawChart($(id), cs), 0);
+            checkBrowserAlert(sym, s.price, target, stop);
+          } catch (e) {
+            cards.push(`<div class="card"><b>${sym}</b><div class="faint">데이터 로딩 실패: ${e.message || e}</div><button data-del-w="${i}">삭제</button></div>`);
+          }
+        }
+        $("watchlist").innerHTML = cards.join("") || `<div class="faint">관심종목이 없습니다.</div>`;
+        document.querySelectorAll("[data-wi]").forEach(el => el.onchange = () => { const v = el.value === "" ? null : Number(el.value); state.watch[+el.dataset.wi][+el.dataset.wk] = Number.isFinite(v) ? v : null; saveState(); });
+        document.querySelectorAll("[data-del-w]").forEach(el => el.onclick = () => { state.watch.splice(+el.dataset.delW, 1); saveState(); renderWatch(); });
+      }
+
+      function checkBrowserAlert(sym, price, target, stop) {
+        if (!("Notification" in window) || Notification.permission !== "granted") return;
+        const sent = JSON.parse(localStorage.getItem("stock-master-alerts") || "{}");
+        const fire = (key, title, body) => { if (sent[key]) return; sent[key] = Date.now(); localStorage.setItem("stock-master-alerts", JSON.stringify(sent)); new Notification(title, { body }); };
+        if (target != null && price >= target) fire(`${sym}:target:${target}`, `${sym} 목표가 도달`, `현재 ${fmt(price)} / 목표 ${fmt(target)}`);
+        if (stop != null && price <= stop) fire(`${sym}:stop:${stop}`, `${sym} 손절가 도달`, `현재 ${fmt(price)} / 손절 ${fmt(stop)}`);
+      }
+
+      async function renderRecs() {
+        $("marketTabs").innerHTML = Object.keys(state.universe).map(m => `<button class="${state.recMarket===m?"active":""}" data-market="${m}">${m}</button>`).join("");
+        document.querySelectorAll("[data-market]").forEach(b => b.onclick = () => { state.recMarket = b.dataset.market; saveState(); renderRecs(); });
+        const rows = [];
+        for (const [sym, name] of state.universe[state.recMarket]) {
+          try {
+            const s = signal(sym, await candles(sym, "1y"), state.risk);
+            if (s) rows.push({ ...s, name });
+          } catch {}
+        }
+        rows.sort((a,b)=>b.score-a.score);
+        $("recommendations").innerHTML = rows.slice(0, 6).map(r => `<div class="row" style="grid-template-columns:1.2fr .7fr .7fr auto;">
+          <div><b>${r.name}</b><div class="faint">${r.symbol}</div></div><span class="badge ${r.tone}">${r.label}</span><div class="small">score ${r.score}</div><button data-add-rec="${r.symbol}">담기</button>
+        </div>`).join("") || `<div class="faint">추천 결과 없음</div>`;
+        document.querySelectorAll("[data-add-rec]").forEach(b => b.onclick = () => addWatch(b.dataset.addRec));
+      }
+
+      async function loadNews() {
+        $("news").innerHTML = "뉴스 불러오는 중...";
+        try {
+          const url = "https://news.google.com/rss/search?q=" + encodeURIComponent("증시 경제 금리") + "&hl=ko&gl=KR&ceid=KR:ko";
+          const xml = await proxied(url);
+          const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 8).map(m => {
+            const block = m[1];
+            const title = (block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/) || [,"",""])[1] || RegExp.$2;
+            const link = (block.match(/<link>(.*?)<\/link>/) || [,"#"])[1];
+            return `<li><a class="muted" href="${link}" target="_blank" rel="noreferrer">${title.replace(/<[^>]+>/g,"")}</a></li>`;
+          });
+          $("news").innerHTML = `<ul class="reasons">${items.join("")}</ul>`;
+        } catch (e) {
+          $("news").innerHTML = "뉴스를 불러오지 못했습니다.";
+        }
+      }
+
+      function addWatch(sym) {
+        const s = (sym || $("wSymbol").value).trim().toUpperCase();
+        if (!s) return;
+        if (!state.watch.some(w => w[0] === s)) state.watch.push([s, Number($("wTarget").value) || null, Number($("wStop").value) || null]);
+        $("wSymbol").value = ""; $("wTarget").value = ""; $("wStop").value = "";
+        saveState(); renderWatch();
+      }
+
+      $("risk").onchange = () => { state.risk = $("risk").value; saveState(); renderWatch(); renderRecs(); };
+      $("refreshBtn").onclick = () => render();
+      $("notifyBtn").onclick = async () => { if ("Notification" in window) await Notification.requestPermission(); };
+      $("addWatch").onclick = () => addWatch();
+      $("addHolding").onclick = () => {
+        const symbol = $("hSymbol").value.trim().toUpperCase(), qty = Number($("hQty").value), avg = Number($("hAvg").value);
+        if (!symbol || !qty || !Number.isFinite(avg)) return;
+        const existing = state.holdings.find(h => h.symbol === symbol);
+        if (existing) { existing.qty = qty; existing.avgBuyPrice = avg; existing.market = $("hMarket").value.trim().toUpperCase() || classify(symbol); }
+        else state.holdings.push({ symbol, market: $("hMarket").value.trim().toUpperCase() || classify(symbol), qty, avgBuyPrice: avg });
+        $("hSymbol").value = ""; $("hQty").value = ""; $("hAvg").value = "";
+        saveState(); renderPortfolio();
+      };
+      $("newsBtn").onclick = loadNews;
+
+      render();
+    </script>
+  </body>
+</html>
