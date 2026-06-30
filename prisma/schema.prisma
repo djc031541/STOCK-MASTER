@@ -1,14 +1,16 @@
 // GlobalTrade Advisor — 데이터 구조
-// 무료 시작: SQLite. 나중에 Postgres 전환 시 provider만 "postgresql"로 바꾸고
-// DATABASE_URL을 교체하면 됩니다.
+// 클라우드 배포(Firebase App Hosting)용으로 PostgreSQL 사용.
+//   DATABASE_URL : 풀링 연결(서버리스에서 사용) — 예) Neon/Supabase 풀러 URL
+//   DIRECT_URL   : 직접 연결(마이그레이션용). 없으면 DATABASE_URL 재사용.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // 사용자

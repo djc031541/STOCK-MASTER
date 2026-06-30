@@ -1,0 +1,43 @@
+# Firebase App Hosting 설정 (Next.js SSR)
+# 문서: https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  minInstances: 0
+  maxInstances: 2
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+# 환경변수 / 시크릿
+#   - value: 일반 값 (공개돼도 무방한 것)
+#   - secret: Cloud Secret Manager 의 시크릿 이름 (민감정보)
+#     먼저 `firebase apphosting:secrets:set <이름>` 으로 등록해야 함.
+env:
+  - variable: NODE_ENV
+    value: production
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # 필수: 클라우드 PostgreSQL (Neon/Supabase 등)
+  - variable: DATABASE_URL
+    secret: DATABASE_URL
+    availability:
+      - RUNTIME
+  - variable: DIRECT_URL
+    secret: DIRECT_URL
+    availability:
+      - RUNTIME
+
+  # 선택: 뉴스 AI 요약
+  # - variable: ANTHROPIC_API_KEY
+  #   secret: ANTHROPIC_API_KEY
+  #   availability: [RUNTIME]
+
+  # 선택: 알림(이메일/카카오)
+  # - variable: RESEND_API_KEY
+  #   secret: RESEND_API_KEY
+  #   availability: [RUNTIME]
+  # - variable: KAKAO_ACCESS_TOKEN
+  #   secret: KAKAO_ACCESS_TOKEN
+  #   availability: [RUNTIME]

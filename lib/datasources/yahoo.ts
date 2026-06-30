@@ -55,39 +55,47 @@ type ChartResponse = {
 
 // 간단한 메모리 캐시 (60초) — 호출량 절약
 const cache = new Map<string, { at: number; data: ChartResponse }>();
-const TTL = 60_000;
-const DB_TTL = 5 * 60_000;
+// 실시간성을 위해 짧게 (메모리 15초 / DB 45초)
+const TTL = 15_000;
+const DB_TTL = 45_000;
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Node fetch 폴백 (클라우드에 curl이 없을 때). 짧은 UA 사용.
+async function fetchJson(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`fetch ${res.status}`);
+  return res.text();
+}
+
 async function curlJson(url: string, symbol: string) {
   let lastError: Error | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // 1) 시스템 curl 우선 (로컬/대부분의 리눅스 이미지)
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const { stdout } = await execFileAsync(
         "curl",
-        [
-          "-sS",
-          "--fail",
-          "--retry",
-          "1",
-          "--max-time",
-          "15",
-          "-A",
-          UA,
-          "-H",
-          "Accept: application/json",
-          url,
-        ],
+        ["-sS", "--fail", "--retry", "1", "--max-time", "15", "-A", UA, "-H", "Accept: application/json", url],
         { maxBuffer: 10 * 1024 * 1024 }
       );
       return stdout;
     } catch (e) {
       lastError = e as Error;
+      // curl 자체가 없으면(ENOENT) 재시도 의미 없음 → fetch 폴백으로
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") break;
       await wait(250 * (attempt + 1));
     }
+  }
+  // 2) Node fetch 폴백 (curl 미존재/실패 시)
+  try {
+    return await fetchJson(url);
+  } catch (e) {
+    lastError = e as Error;
   }
   throw new Error(`Yahoo 호출 실패 (${symbol}): ${lastError?.message ?? "unknown"}`);
 }

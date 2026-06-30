@@ -49,6 +49,7 @@ export type SignalResult = {
   price: number;
   indicators: IndicatorSnapshot;
   reasons: string[]; // 사람이 읽을 근거
+  kid: string; // 초딩 버전 쉬운 설명
 };
 
 export type RiskProfile = "안정" | "중립" | "공격";

@@ -9,3 +9,4 @@ build
 prisma/dev.db
 .DS_Store
 npm-debug.log*
+tsconfig.tsbuildinfo

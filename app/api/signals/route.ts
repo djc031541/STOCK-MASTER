@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCandles } from "@/lib/datasources/yahoo";
-import { generateSignal, SIGNAL_LABEL } from "@/lib/signal";
+import { generateSignal, gradeFromScore, SIGNAL_LABEL } from "@/lib/signal";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/user";
 import { classifyMarket } from "@/lib/markets";
+import { displayName } from "@/lib/names";
+import { fetchSentiment } from "@/lib/news-sentiment";
+import { buildKid } from "@/lib/explain";
+import { computeLevels } from "@/lib/levels";
 import type { RiskProfile } from "@/lib/types";
 
 // GET /api/signals?risk=중립&symbols=NVDA,AAPL
@@ -33,29 +37,51 @@ export async function GET(req: NextRequest) {
       symbols.map(async (symbol) => {
         const candles = await getCandles(symbol, "1y", "1d");
         const sig = generateSignal(symbol, candles, risk);
-        return { symbol, sig };
+        if (!sig) return { symbol, sig: null, senti: null, candles };
+        // 최신 뉴스 감성 반영
+        const senti = await fetchSentiment(symbol, displayName(symbol));
+        return { symbol, sig, senti, candles };
       })
     );
 
     const data = results
       .filter(
-        (r): r is PromiseFulfilledResult<{ symbol: string; sig: ReturnType<typeof generateSignal> }> =>
+        (r): r is PromiseFulfilledResult<{ symbol: string; sig: NonNullable<ReturnType<typeof generateSignal>>; senti: Awaited<ReturnType<typeof fetchSentiment>>; candles: Awaited<ReturnType<typeof getCandles>> }> =>
           r.status === "fulfilled" && r.value.sig !== null
       )
       .map((r) => {
-        const s = r.value.sig!;
+        const s = r.value.sig;
+        const senti = r.value.senti!;
         const i = s.indicators;
+        const levels = computeLevels(r.value.candles, s.price);
+
+        // 차트 점수 + 뉴스 감성 → 종합 점수로 재등급
+        const combined = Math.max(-100, Math.min(100, s.score + senti.contribution));
+        const type = gradeFromScore(combined, risk);
+        const reasons = [...s.reasons];
+        if (senti.contribution !== 0)
+          reasons.push(`📰 최근 뉴스 ${senti.label}(호재 ${senti.pos} / 악재 ${senti.neg})`);
+        const market = classifyMarket(s.symbol);
+        const name = displayName(s.symbol);
+        const kid = buildKid(name, type, combined, i, s.price, market, senti);
+
         return {
           symbol: s.symbol,
-          market: classifyMarket(s.symbol),
-          type: s.type,
-          label: SIGNAL_LABEL[s.type].ko,
-          tone: SIGNAL_LABEL[s.type].tone,
-          score: s.score,
+          name,
+          market,
+          type,
+          label: SIGNAL_LABEL[type].ko,
+          tone: SIGNAL_LABEL[type].tone,
+          score: Math.round(combined),
+          techScore: s.score,
+          newsScore: senti.contribution,
+          newsLabel: senti.label,
           price: s.price,
           rsi: i.rsi,
-          reasons: s.reasons,
-          // 펼침 카드용 지표 스냅샷
+          reasons,
+          kid,
+          levels,
+          news: senti.headlines,
           indicators: {
             rsi: i.rsi,
             maTrend: i.maShort != null && i.maLong != null ? (i.maShort > i.maLong ? "상승" : "하락") : null,

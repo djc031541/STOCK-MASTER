@@ -19,10 +19,11 @@ const WEIGHTS = {
 };
 
 // 리스크 성향별 매수/매도 임계값 (점수 절대값)
+// 너무 높으면 늘 '관망'만 나와서, 실제로 등급이 갈리도록 현실적으로 낮춤.
 const THRESHOLDS: Record<RiskProfile, { buy: number; strong: number }> = {
-  공격: { buy: 25, strong: 40 },
-  중립: { buy: 35, strong: 55 },
-  안정: { buy: 50, strong: 70 },
+  공격: { buy: 12, strong: 30 },
+  중립: { buy: 18, strong: 38 },
+  안정: { buy: 28, strong: 50 },
 };
 
 export function computeIndicators(candles: Candle[]): IndicatorSnapshot {
@@ -93,24 +94,29 @@ function scoreFromIndicators(ind: IndicatorSnapshot): {
     score -= WEIGHTS.ma;
     reasons.push("데드크로스 발생(단기선이 장기선 하향 돌파)");
   } else if (ind.maShort != null && ind.maLong != null) {
-    // 크로스가 없어도 추세 지속을 반영 (추세추종형 매수가 가능하도록)
+    // 크로스가 없어도 추세 지속을 반영 (추세추종형 매수/매도가 가능하도록)
+    const gap = (ind.maShort - ind.maLong) / ind.maLong; // 이격도
     const trend = ind.maShort > ind.maLong ? 1 : -1;
-    score += trend * WEIGHTS.ma * 0.6;
-    reasons.push(trend > 0 ? "단기선이 장기선 위(상승추세 지속)" : "단기선이 장기선 아래(하락추세 지속)");
+    // 이격이 클수록 추세 신뢰도 ↑ (0.5~0.85 가중)
+    const conf = Math.min(0.85, 0.5 + Math.abs(gap) * 8);
+    score += trend * WEIGHTS.ma * conf;
+    reasons.push(trend > 0 ? "20일선이 60일선 위 — 상승추세 지속" : "20일선이 60일선 아래 — 하락추세 지속");
   }
 
   // 2) RSI
   if (ind.rsi != null) {
     if (ind.rsi <= 30) {
       score += WEIGHTS.rsi;
-      reasons.push(`RSI ${ind.rsi.toFixed(0)} (과매도 구간)`);
+      reasons.push(`RSI ${ind.rsi.toFixed(0)} — 과매도(너무 많이 떨어짐, 반등 기대)`);
     } else if (ind.rsi >= 70) {
       score -= WEIGHTS.rsi;
-      reasons.push(`RSI ${ind.rsi.toFixed(0)} (과매수 구간)`);
+      reasons.push(`RSI ${ind.rsi.toFixed(0)} — 과매수(너무 많이 오름, 조정 주의)`);
     } else {
-      // 중립 구간: 50 기준 선형 가감
+      // 중립 구간: 50 기준 선형 가감 (기여도 강화)
       const tilt = (50 - ind.rsi) / 20; // 30~70 → +1~-1
-      score += tilt * WEIGHTS.rsi * 0.5;
+      score += tilt * WEIGHTS.rsi * 0.7;
+      if (ind.rsi >= 55) reasons.push(`RSI ${ind.rsi.toFixed(0)} — 다소 강세`);
+      else if (ind.rsi <= 45) reasons.push(`RSI ${ind.rsi.toFixed(0)} — 다소 약세`);
     }
   }
 
@@ -123,7 +129,8 @@ function scoreFromIndicators(ind: IndicatorSnapshot): {
     reasons.push("MACD 데드크로스(시그널선 하향 돌파)");
   } else if (ind.macd != null && ind.macdSignal != null) {
     const dir = ind.macd > ind.macdSignal ? 1 : -1;
-    score += dir * WEIGHTS.macd * 0.6;
+    score += dir * WEIGHTS.macd * 0.7;
+    reasons.push(dir > 0 ? "MACD 시그널선 위 — 상승 모멘텀" : "MACD 시그널선 아래 — 하락 모멘텀");
   }
 
   // 4) 볼린저밴드
@@ -138,6 +145,29 @@ function scoreFromIndicators(ind: IndicatorSnapshot): {
   // -100 ~ +100 클램프
   score = Math.max(-100, Math.min(100, score));
   return { score, reasons };
+}
+
+// 초딩 버전 설명 — 등급 + 핵심 지표를 쉬운 말로
+export function kidExplain(type: SignalType, ind: IndicatorSnapshot): string {
+  const head: Record<SignalType, string> = {
+    STRONG_BUY: "📈 지금 사기 좋은 신호가 아주 강해요!",
+    BUY: "🙂 사도 괜찮아 보이는 신호예요.",
+    HOLD: "😐 지금은 기다리는 게 좋아요. 오를지 내릴지 아직 헷갈려요.",
+    SELL: "🙁 팔까 고민해볼 신호예요.",
+    STRONG_SELL: "📉 위험 신호가 강해요. 조심하세요!",
+  };
+  const bits: string[] = [];
+  if (ind.goldenCross) bits.push("최근 주가에 '오르기 시작' 표시가 떴어요(골든크로스).");
+  else if (ind.deadCross) bits.push("최근 주가에 '내려가기 시작' 표시가 떴어요(데드크로스).");
+  else if (ind.maShort != null && ind.maLong != null)
+    bits.push(ind.maShort > ind.maLong ? "요즘 가격이 위로 가는 흐름이에요." : "요즘 가격이 아래로 가는 흐름이에요.");
+  if (ind.rsi != null) {
+    if (ind.rsi <= 30) bits.push("너무 많이 떨어져서 다시 튀어 오를 수 있어요.");
+    else if (ind.rsi >= 70) bits.push("너무 많이 올라서 잠깐 쉴 수도 있어요.");
+    else if (ind.rsi >= 55) bits.push("사는 사람이 좀 더 많은 편이에요.");
+    else if (ind.rsi <= 45) bits.push("파는 사람이 좀 더 많은 편이에요.");
+  }
+  return `${head[type]} ${bits.join(" ")}`.trim();
 }
 
 export function gradeFromScore(score: number, risk: RiskProfile): SignalType {
@@ -167,6 +197,7 @@ export function generateSignal(
     price,
     indicators,
     reasons,
+    kid: kidExplain(type, indicators),
   };
 }
 
